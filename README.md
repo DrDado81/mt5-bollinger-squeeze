@@ -52,6 +52,6 @@ Installazione: Pine Editor → incolla → Salva → Aggiungi al grafico. Alert:
 
 ## TradingView: `tradingview/BB_Squeeze_Scanner.pine`
 
-Dashboard multi-simbolo (28 cross + oro + DAX) con la stessa logica di `BB_Squeeze_PreBreakout.pine`, letta sull'ultima barra chiusa di ogni simbolo. Colonne: stato (SQUEEZE / ARMATO), ultimo segnale (PRE / OK con barre trascorse), distanza % del BW dal minimo, barre di squeeze, ADR % (range giornaliero medio sui giorni chiusi). Ordinamento: segnali recenti, poi squeeze, poi armati; a parità, ADR più alto.
+Dashboard compatta multi-simbolo (28 cross + oro + DAX) con la stessa logica di `BB_Squeeze_PreBreakout.pine`, letta sull'ultima barra chiusa. Mostra solo i simboli attivi, ognuno come nome + fase: BREAKOUT ▲/▼ (conferma), PRE ▲/▼, SQUEEZE n (barre), PRONTO (squeeze finito), opzionalmente VICINO. Sotto la fase l'ADR % giornaliero; dettagli nel tooltip della cella.
 
 Usa 30 richieste `request.security` (limite 40 sui piani non Professional). Le due copie della logica (indicatore e scanner) vanno tenute allineate a mano: Pine non importa file locali.

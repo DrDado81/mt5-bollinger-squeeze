@@ -36,8 +36,12 @@ confBars = input.int(5, "Barre utili per la conferma", minval = 1, group = grpSi
 grpDash    = "Dashboard"
 adrDays    = input.int(20, "Giorni per ADR", minval = 5, group = grpDash, tooltip = "Range giornaliero medio (max-min) in % del prezzo, sui giorni chiusi. Richiede timeframe intraday.")
 evMaxAge   = input.int(3, "Mostra segnali delle ultime N barre", minval = 0, group = grpDash)
-onlyActive = input.bool(false, "Mostra solo simboli attivi", group = grpDash)
-tblPos     = input.string("In alto a destra", "Posizione", options = ["In alto a destra", "In alto a sinistra", "In basso a destra", "In basso a sinistra"], group = grpDash)
+showNear   = input.bool(false, "Mostra anche i simboli VICINI allo squeeze", group = grpDash, tooltip = "BW entro la soglia qui sotto dal minimo, ma condizioni di squeeze non ancora complete (es. BW ancora in calo, non piatto).")
+nearPct    = input.float(25.0, "Soglia VICINO (% sopra il minimo)", minval = 0, group = grpDash)
+showAdr    = input.bool(true, "Mostra ADR % sotto lo stato", group = grpDash)
+nCols      = input.int(6, "Simboli per riga", minval = 1, maxval = 10, group = grpDash)
+showLegend = input.bool(true, "Mostra legenda", group = grpDash)
+tblPos     = input.string("In alto al centro", "Posizione", options = ["In alto al centro", "In alto a destra", "In alto a sinistra", "In basso a destra", "In basso a sinistra"], group = grpDash)
 tblSize    = input.string("Piccolo", "Dimensione testo", options = ["Minuscolo", "Piccolo", "Normale"], group = grpDash)
 alertOn    = input.bool(true, "Alert su nuovi segnali (crea alert: 'Qualsiasi chiamata alert()')", group = grpDash)
 
@@ -182,62 +186,65 @@ if alertOn and barstate.isrealtime
             txt = ev == 2 ? "PRE-ESPLOSIONE LONG" : ev == -2 ? "PRE-ESPLOSIONE SHORT" : ev == 3 ? "CONFERMA LONG" : "CONFERMA SHORT"
             alert(names.get(i) + " " + timeframe.period + ": " + txt, alert.freq_once_per_bar)
 
-// ─── Dashboard ───────────────────────────────────────────────────────────
-pos = tblPos == "In alto a destra" ? position.top_right : tblPos == "In alto a sinistra" ? position.top_left : tblPos == "In basso a destra" ? position.bottom_right : position.bottom_left
+// ─── Dashboard compatta ──────────────────────────────────────────────────
+// Ogni simbolo = 2 celle (nome sopra, fase sotto). Passa il mouse su una cella per i dettagli.
+// Fasi, in ordine di importanza:
+//   BREAKOUT ▲/▼  conferma: candela aperta oltre la banda dopo il PRE
+//   PRE ▲/▼       dopo lo squeeze: candela sulla banda + BW in salita
+//   SQUEEZE n     compressione in corso da n barre
+//   PRONTO        squeeze appena finito: in attesa di PRE
+//   VICINO        (opzionale) BW vicino al minimo, squeeze non ancora completo
+pos = tblPos == "In alto al centro" ? position.top_center : tblPos == "In alto a destra" ? position.top_right : tblPos == "In alto a sinistra" ? position.top_left : tblPos == "In basso a destra" ? position.bottom_right : position.bottom_left
 ts  = tblSize == "Minuscolo" ? size.tiny : tblSize == "Normale" ? size.normal : size.small
 
-var table dash = table.new(pos, 6, 32, border_width = 1)
+var table dash = table.new(pos, 10, 14, border_width = 1)
 
 if barstate.islast
-    table.clear(dash, 0, 0, 5, 31)
-    hdr = color.new(color.gray, 20)
-    table.cell(dash, 0, 0, "Simbolo",   bgcolor = hdr, text_color = color.white, text_size = ts)
-    table.cell(dash, 1, 0, "Stato",     bgcolor = hdr, text_color = color.white, text_size = ts)
-    table.cell(dash, 2, 0, "Segnale",   bgcolor = hdr, text_color = color.white, text_size = ts)
-    table.cell(dash, 3, 0, "BW vs min", bgcolor = hdr, text_color = color.white, text_size = ts)
-    table.cell(dash, 4, 0, "Barre sqz", bgcolor = hdr, text_color = color.white, text_size = ts)
-    table.cell(dash, 5, 0, "ADR %",     bgcolor = hdr, text_color = color.white, text_size = ts)
+    table.clear(dash, 0, 0, 9, 13)
 
-    // ordinamento: segnale recente > squeeze > armato > niente; a parità, ADR più alto
+    // priorità: 5 breakout, 4 pre, 3 squeeze, 2 pronto, 1 vicino, 0 non mostrato
+    prios  = array.new_int()
     scores = array.new_float()
     for i = 0 to n - 1
-        st     = aSt.get(i)
-        age    = aAge.get(i)
-        recent = aEv.get(i) != 0 and not na(age) and age <= evMaxAge
-        prio   = na(aBw.get(i)) ? 0 : recent ? 4 : st == 2 ? 3 : st == 1 ? 2 : 1
-        scores.push(prio * 1000 + nz(aAdr.get(i)))
-    idx = scores.sort_indices(order.descending)
-
-    row = 1
-    for k = 0 to n - 1
-        i      = idx.get(k)
         st     = aSt.get(i)
         ev     = aEv.get(i)
         age    = aAge.get(i)
         bwp    = aBw.get(i)
         recent = ev != 0 and not na(age) and age <= evMaxAge
-        active = recent or st > 0
-        if na(bwp)
-            if not onlyActive
-                table.cell(dash, 0, row, names.get(i), bgcolor = color.new(color.gray, 70), text_color = color.white, text_size = ts)
-                table.cell(dash, 1, row, "n/d", bgcolor = color.new(color.gray, 70), text_color = color.white, text_size = ts)
-                row += 1
+        prio   = na(bwp) ? 0 : recent and math.abs(ev) == 3 ? 5 : recent ? 4 : st == 2 ? 3 : st == 1 ? 2 : showNear and bwp <= nearPct ? 1 : 0
+        prios.push(prio)
+        scores.push(prio * 1000 + nz(aAdr.get(i)))
+    idx = scores.sort_indices(order.descending)
+
+    shown = 0
+    for k = 0 to n - 1
+        i    = idx.get(k)
+        prio = prios.get(i)
+        if prio == 0
             continue
-        if onlyActive and not active
-            continue
+        ev  = aEv.get(i)
+        age = aAge.get(i)
+        dir = ev > 0 ? "▲" : "▼"
 
-        stTxt = st == 2 ? "SQUEEZE" : st == 1 ? "ARMATO" : "-"
-        stBg  = st == 2 ? color.red : st == 1 ? color.orange : color.new(color.gray, 60)
-        evTxt = recent ? (ev == 2 ? "PRE ▲" : ev == -2 ? "PRE ▼" : ev == 3 ? "OK ▲" : "OK ▼") + " (" + str.tostring(age) + ")" : ""
-        evBg  = recent ? (ev > 0 ? color.green : color.maroon) : color.new(color.gray, 85)
+        phase = prio == 5 ? "BREAKOUT " + dir : prio == 4 ? "PRE " + dir : prio == 3 ? "SQUEEZE " + str.tostring(aSq.get(i)) : prio == 2 ? "PRONTO" : "VICINO"
+        bg    = prio == 5 ? (ev > 0 ? color.new(color.green, 0) : color.new(color.red, 0)) : prio == 4 ? (ev > 0 ? color.new(color.teal, 0) : color.new(color.maroon, 0)) : prio == 3 ? color.new(color.blue, 0) : prio == 2 ? color.new(color.orange, 0) : color.new(color.gray, 40)
+        if prio >= 4 and age > 0
+            phase += " (" + str.tostring(age) + ")"
+        line2 = showAdr and not na(aAdr.get(i)) ? phase + " · " + str.tostring(aAdr.get(i), "0.00") + "%" : phase
 
-        table.cell(dash, 0, row, names.get(i), bgcolor = color.new(color.blue, 20), text_color = color.white, text_size = ts)
-        table.cell(dash, 1, row, stTxt, bgcolor = stBg, text_color = color.white, text_size = ts)
-        table.cell(dash, 2, row, evTxt, bgcolor = evBg, text_color = color.white, text_size = ts)
-        table.cell(dash, 3, row, "+" + str.tostring(bwp, "#.0") + "%", bgcolor = color.new(color.gray, 85), text_color = chart.fg_color, text_size = ts)
-        table.cell(dash, 4, row, st > 0 ? str.tostring(aSq.get(i)) : "", bgcolor = color.new(color.gray, 85), text_color = chart.fg_color, text_size = ts)
-        table.cell(dash, 5, row, na(aAdr.get(i)) ? "n/d" : str.tostring(aAdr.get(i), "#.00"), bgcolor = color.new(color.gray, 85), text_color = chart.fg_color, text_size = ts)
-        row += 1
+        tip = names.get(i) + "\nBW sopra il minimo: " + str.tostring(aBw.get(i), "0.0") + "%" + "\nADR " + str.tostring(adrDays) + "g: " + (na(aAdr.get(i)) ? "n/d" : str.tostring(aAdr.get(i), "0.00") + "%") + (prio >= 4 ? "\nSegnale di " + str.tostring(age) + " barre fa" : "")
 
-    if row == 1
-        table.cell(dash, 0, 1, "Nessuno squeeze", bgcolor = color.gray, text_color = color.white, text_size = ts)
+        col = shown % nCols
+        row = math.floor(shown / nCols) * 2
+        if row <= 10
+            table.cell(dash, col, row, names.get(i), bgcolor = bg, text_color = color.white, text_size = ts, tooltip = tip)
+            table.cell(dash, col, row + 1, line2, bgcolor = color.new(bg, 25), text_color = color.white, text_size = ts, tooltip = tip)
+        shown += 1
+
+    if shown == 0
+        table.cell(dash, 0, 0, "Nessuno squeeze", bgcolor = color.gray, text_color = color.white, text_size = ts)
+
+    if showLegend
+        table.cell(dash, 0, 12, "BREAKOUT = conferma · PRE = banda + BW in salita · SQUEEZE n = barre in compressione · PRONTO = squeeze finito, attendi PRE · (n) = barre fa · % = ADR", text_color = chart.fg_color, text_size = size.tiny, bgcolor = color.new(color.gray, 90))
+        if nCols > 1
+            table.merge_cells(dash, 0, 12, nCols - 1, 12)
