@@ -41,7 +41,7 @@ nearPct    = input.float(25.0, "Soglia VICINO (% sopra il minimo)", minval = 0, 
 showAdr    = input.bool(true, "Mostra ADR % sotto lo stato", group = grpDash)
 nCols      = input.int(6, "Simboli per riga", minval = 1, maxval = 10, group = grpDash)
 showLegend = input.bool(true, "Mostra legenda", group = grpDash)
-tblPos     = input.string("In alto al centro", "Posizione", options = ["In alto al centro", "In alto a destra", "In alto a sinistra", "In basso a destra", "In basso a sinistra"], group = grpDash)
+tblPos     = input.string("In basso al centro", "Posizione", options = ["In basso al centro", "In alto al centro", "In alto a destra", "In alto a sinistra", "In basso a destra", "In basso a sinistra"], group = grpDash)
 tblSize    = input.string("Piccolo", "Dimensione testo", options = ["Minuscolo", "Piccolo", "Normale"], group = grpDash)
 alertOn    = input.bool(true, "Alert su nuovi segnali (crea alert: 'Qualsiasi chiamata alert()')", group = grpDash)
 
@@ -194,7 +194,7 @@ if alertOn and barstate.isrealtime
 //   SQUEEZE n     compressione in corso da n barre
 //   PRONTO        squeeze appena finito: in attesa di PRE
 //   VICINO        (opzionale) BW vicino al minimo, squeeze non ancora completo
-pos = tblPos == "In alto al centro" ? position.top_center : tblPos == "In alto a destra" ? position.top_right : tblPos == "In alto a sinistra" ? position.top_left : tblPos == "In basso a destra" ? position.bottom_right : position.bottom_left
+pos = tblPos == "In basso al centro" ? position.bottom_center : tblPos == "In alto al centro" ? position.top_center : tblPos == "In alto a destra" ? position.top_right : tblPos == "In alto a sinistra" ? position.top_left : tblPos == "In basso a destra" ? position.bottom_right : position.bottom_left
 ts  = tblSize == "Minuscolo" ? size.tiny : tblSize == "Normale" ? size.normal : size.small
 
 var table dash = table.new(pos, 10, 14, border_width = 1)
