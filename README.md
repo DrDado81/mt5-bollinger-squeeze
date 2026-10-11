@@ -8,6 +8,7 @@ Indicatore + Expert Advisor MQL5 per identificare gli squeeze delle Bande di Bol
 |---|---|
 | `MQL5/Include/BBSqueeze/SqueezeCommon.mqh` | `MQL5\Include\BBSqueeze\` |
 | `MQL5/Indicators/BBSqueeze.mq5` | `MQL5\Indicators\` |
+| `MQL5/Indicators/BBSqueezeDashboard.mq5` | `MQL5\Indicators\` |
 | `MQL5/Experts/BBSqueezeEA.mq5` | `MQL5\Experts\` |
 
 Compilare in MetaEditor (F7) prima l'indicatore, poi l'EA. L'EA **non** dipende dall'indicatore (calcola tutto internamente con la stessa logica dell'include comune), quindi indicatore ed EA danno sempre lo stesso squeeze a parità di parametri.
@@ -18,9 +19,24 @@ Compilare in MetaEditor (F7) prima l'indicatore, poi l'EA. L'EA **non** dipende 
 - `SQZ_KELTNER`: bande di Bollinger interamente dentro il canale di Keltner (EMA ± ATR × 1.5), stile TTM Squeeze.
 - `SQZ_BOTH`: entrambe.
 
-Indicatore: istogramma grigio = no squeeze, rosso = squeeze, verde = prima barra di rilascio; linea tratteggiata = soglia. Buffer 3 = stato squeeze (1/0) leggibile via `iCustom`.
+Filtri aggiuntivi (stessi di TradingView): BW piatto (`InpFlatBars`, `InpFlatMax`) e media centrale piatta (`InpSlopeMax` × ATR). Nota: l'ATR di MT5 è una media semplice del True Range, quello di TradingView una RMA: piccole differenze sulla pendenza sono attese.
 
-## Logica EA
+## Fasi (logica in `SqueezeCommon.mqh`, struct `SqzTracker`)
+
+1. **SQUEEZE**: squeeze valido da almeno `InpMinBars` barre.
+2. **PRONTO**: squeeze valido finito da al massimo `InpArmBars` barre (IN FORMAZIONE = squeeze ancora più corto del minimo).
+3. **PRE ▲/▼**: con setup armato, candela chiusa sulla banda (tolleranza `InpTouchTol`) e BW maggiore delle `InpRiseBars` barre precedenti. Una volta per direzione per episodio.
+4. **BREAKOUT ▲/▼**: entro `InpConfBars` barre dal PRE, una candela apre oltre la banda della barra precedente.
+
+## Indicatore `BBSqueeze.mq5` (v2)
+
+Pannello BW: blu normale, rosso squeeze valido, arancio squeeze corto / PRONTO; linee Lowest Contraction e Highest Expansion. Sul prezzo: freccia sottile = PRE, freccia grossa = BREAKOUT, rettangolo = range dello squeeze. Buffer per `iCustom`: 4 = stato (0/1/2), 5 = PRE (±2), 6 = BREAKOUT (±3). Alert e push opzionali.
+
+## Dashboard `BBSqueezeDashboard.mq5`
+
+Indicatore sul grafico che analizza la lista di simboli (aggiungere il suffisso del broker se serve; il DAX ha nomi diversi da broker a broker, default `GER40`). Colonne: Simbolo (clic = apre il grafico), Fase, Barre di squeeze, BW sopra il minimo, ADR % (20 giorni chiusi), Spread/ADR % (spread medio delle ultime barre diviso range giornaliero medio: verde ≤5%, giallo ≤10%, rosso oltre). Ordine: BREAKOUT, PRE, SQUEEZE, PRONTO, VICINO; a parità, costo più basso prima. Per default mostra solo i simboli attivi. Lo spread medio usa il campo `spread` delle barre registrato dal broker; se manca usa lo spread corrente.
+
+## Logica EA (v1, da riallineare alle fasi quando l'indicatore è definitivo)
 
 1. Episodio di squeeze valido se dura almeno `InpMinSqueezeBars`; si registrano max/min delle barre di squeeze.
 2. Setup armato durante lo squeeze valido e per `InpArmedBars` barre dopo la fine.
