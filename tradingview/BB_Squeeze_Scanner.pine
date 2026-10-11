@@ -1,0 +1,243 @@
+//@version=6
+// BB Squeeze Scanner - dashboard multi-simbolo
+// Stessa logica di BB_Squeeze_PreBreakout.pine (squeeze -> pre-esplosione -> conferma),
+// applicata a 28 cross + oro + DAX, più la volatilità media giornaliera (ADR %).
+// Valori letti sull'ULTIMA BARRA CHIUSA di ogni simbolo: niente repaint.
+// Pine non consente di importare file locali: se cambi la logica in uno dei due script,
+// riportala anche nell'altro.
+indicator("BB Squeeze Scanner", shorttitle = "BBSqz Scanner", overlay = true, dynamic_requests = true)
+
+// ─── Simboli ─────────────────────────────────────────────────────────────
+grpSym           = "Simboli"
+useChartProvider = input.bool(true, "Usa provider del grafico per i cambi", group = grpSym)
+manualProvider   = input.string("OANDA", "Provider manuale cambi", options = ["OANDA", "FOREXCOM", "FX", "PEPPERSTONE", "CAPITALCOM"], group = grpSym)
+goldSym          = input.symbol("OANDA:XAUUSD", "Oro", group = grpSym)
+daxSym           = input.symbol("OANDA:DE30EUR", "DAX", group = grpSym)
+
+// ─── Parametri squeeze (identici all'indicatore) ─────────────────────────
+grpSq    = "Squeeze"
+bbLen    = input.int(20, "Periodo Bollinger", minval = 2, group = grpSq)
+bbMult   = input.float(2.0, "Deviazioni standard", minval = 0.1, step = 0.1, group = grpSq)
+lenLow   = input.int(125, "Lookback minimo BW", minval = 10, group = grpSq)
+tolPct   = input.float(10.0, "Tolleranza sopra il minimo (%)", minval = 0, group = grpSq)
+useFlat  = input.bool(true, "Richiedi BW piatto", group = grpSq)
+lenFlat  = input.int(10, "Barre per piattezza", minval = 2, group = grpSq)
+flatMax  = input.float(0.15, "Escursione max BW (frazione della media)", minval = 0, step = 0.01, group = grpSq)
+useSlope = input.bool(true, "Richiedi bande piatte", group = grpSq)
+slopeMax = input.float(1.0, "Pendenza max media centrale (x ATR)", minval = 0, step = 0.1, group = grpSq)
+minBars  = input.int(5, "Durata minima squeeze (barre)", minval = 1, group = grpSq)
+
+grpSig   = "Segnali"
+armBars  = input.int(10, "Barre valide dopo la fine dello squeeze", minval = 0, group = grpSig)
+touchTol = input.float(0.10, "Tolleranza tocco banda", minval = 0, maxval = 0.5, step = 0.05, group = grpSig)
+riseBars = input.int(2, "Barre consecutive di BW in salita", minval = 1, group = grpSig)
+confBars = input.int(5, "Barre utili per la conferma", minval = 1, group = grpSig)
+
+grpDash    = "Dashboard"
+adrDays    = input.int(20, "Giorni per ADR", minval = 5, group = grpDash, tooltip = "Range giornaliero medio (max-min) in % del prezzo, sui giorni chiusi. Richiede timeframe intraday.")
+evMaxAge   = input.int(3, "Mostra segnali delle ultime N barre", minval = 0, group = grpDash)
+onlyActive = input.bool(false, "Mostra solo simboli attivi", group = grpDash)
+tblPos     = input.string("In alto a destra", "Posizione", options = ["In alto a destra", "In alto a sinistra", "In basso a destra", "In basso a sinistra"], group = grpDash)
+tblSize    = input.string("Piccolo", "Dimensione testo", options = ["Minuscolo", "Piccolo", "Normale"], group = grpDash)
+alertOn    = input.bool(true, "Alert su nuovi segnali (crea alert: 'Qualsiasi chiamata alert()')", group = grpDash)
+
+// ─── Logica per singolo simbolo ──────────────────────────────────────────
+// Ritorna i valori della barra precedente (chiusa): usato con lookahead_on -> non repainta.
+f_scan() =>
+    basis  = ta.sma(close, bbLen)
+    dev    = bbMult * ta.stdev(close, bbLen)
+    upper  = basis + dev
+    lower  = basis - dev
+    width  = upper - lower
+    bw     = basis != 0 ? width / basis * 100 : na
+    bwLow  = ta.lowest(bw, lenLow)
+    bwMean = ta.sma(bw, lenFlat)
+    bwRng  = ta.highest(bw, lenFlat) - ta.lowest(bw, lenFlat)
+    atr    = ta.atr(14)
+    slope  = atr > 0 ? math.abs(basis - basis[lenFlat]) / atr : na
+    bwUp   = ta.rising(bw, riseBars)
+
+    condLow   = bw <= bwLow * (1 + tolPct / 100)
+    condFlat  = not useFlat or (bwMean > 0 and bwRng / bwMean <= flatMax)
+    condSlope = not useSlope or (not na(slope) and slope <= slopeMax)
+    sqz       = condLow and condFlat and condSlope and not na(bwLow)
+
+    var int  sqCount   = 0
+    var int  barsSince = na
+    var bool usedLong  = false
+    var bool usedShort = false
+    var int  preLBar   = na
+    var int  preSBar   = na
+    var int  evCode    = 0      // 2/-2 pre-esplosione, 3/-3 conferma
+    var int  evBar     = na
+
+    if sqz
+        sqCount += 1
+        if sqCount == 1
+            usedLong  := false
+            usedShort := false
+        barsSince := na
+    else
+        if sqCount > 0
+            barsSince := sqCount >= minBars ? 1 : na
+            sqCount   := 0
+        else if not na(barsSince)
+            barsSince += 1
+            if barsSince > armBars
+                barsSince := na
+
+    armed = (sqz and sqCount >= minBars) or not na(barsSince)
+
+    preLong  = armed and not usedLong and high >= upper - touchTol * width and bwUp
+    preShort = armed and not usedShort and low <= lower + touchTol * width and bwUp
+    if preLong
+        usedLong := true
+        preLBar  := bar_index
+        evCode   := 2
+        evBar    := bar_index
+    if preShort
+        usedShort := true
+        preSBar   := bar_index
+        evCode    := -2
+        evBar     := bar_index
+
+    confLong  = not na(preLBar) and bar_index > preLBar and bar_index - preLBar <= confBars and open > upper[1]
+    confShort = not na(preSBar) and bar_index > preSBar and bar_index - preSBar <= confBars and open < lower[1]
+    if confLong
+        preLBar := na
+        evCode  := 3
+        evBar   := bar_index
+    if confShort
+        preSBar := na
+        evCode  := -3
+        evBar   := bar_index
+
+    // stato: 2 squeeze valido in corso, 1 armato (squeeze corto o post-squeeze), 0 niente
+    st    = sqz and sqCount >= minBars ? 2 : sqz or armed ? 1 : 0
+    bwPct = bwLow > 0 ? (bw / bwLow - 1) * 100 : na
+    evAge = na(evBar) ? na : bar_index - evBar
+
+    // ADR %: media del range dei giorni chiusi
+    var float dh     = na
+    var float dl     = na
+    var ranges       = array.new_float()
+    if timeframe.change("D")
+        if not na(dh) and dl > 0
+            ranges.push((dh - dl) / dl * 100)
+            if ranges.size() > adrDays
+                ranges.shift()
+        dh := high
+        dl := low
+    else
+        dh := na(dh) ? high : math.max(dh, high)
+        dl := na(dl) ? low : math.min(dl, low)
+    adr = ranges.size() >= math.min(5, adrDays) ? ranges.avg() : na
+
+    [st[1], bwPct[1], sqCount[1], adr[1], evCode[1], evAge[1]]
+
+// ─── Elenco simboli ──────────────────────────────────────────────────────
+var pairs = array.from("AUDCAD", "AUDCHF", "AUDJPY", "AUDNZD", "AUDUSD",
+                       "CADCHF", "CADJPY", "CHFJPY",
+                       "EURAUD", "EURCAD", "EURCHF", "EURGBP", "EURJPY", "EURNZD", "EURUSD",
+                       "GBPAUD", "GBPCAD", "GBPCHF", "GBPJPY", "GBPNZD", "GBPUSD",
+                       "NZDCAD", "NZDCHF", "NZDJPY", "NZDUSD",
+                       "USDCAD", "USDCHF", "USDJPY")
+
+provider = useChartProvider ? syminfo.prefix : manualProvider
+
+var tickers = array.new_string()
+var names   = array.new_string()
+if barstate.isfirst
+    for p in pairs
+        tickers.push(provider + ":" + p)
+        names.push(p)
+    tickers.push(goldSym)
+    names.push("XAUUSD")
+    tickers.push(daxSym)
+    names.push("DAX")
+
+n = tickers.size()
+var aSt  = array.new_int(30, 0)
+var aBw  = array.new_float(30, na)
+var aSq  = array.new_int(30, 0)
+var aAdr = array.new_float(30, na)
+var aEv  = array.new_int(30, 0)
+var aAge = array.new_int(30, na)
+
+for i = 0 to n - 1
+    [st, bwp, sqc, adr, ev, age] = request.security(tickers.get(i), timeframe.period, f_scan(), lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+    aSt.set(i, st)
+    aBw.set(i, bwp)
+    aSq.set(i, sqc)
+    aAdr.set(i, adr)
+    aEv.set(i, ev)
+    aAge.set(i, age)
+
+// ─── Alert su nuovi segnali ──────────────────────────────────────────────
+if alertOn and barstate.isrealtime
+    for i = 0 to n - 1
+        age = aAge.get(i)
+        ev  = aEv.get(i)
+        if not na(age) and age == 0 and ev != 0
+            txt = ev == 2 ? "PRE-ESPLOSIONE LONG" : ev == -2 ? "PRE-ESPLOSIONE SHORT" : ev == 3 ? "CONFERMA LONG" : "CONFERMA SHORT"
+            alert(names.get(i) + " " + timeframe.period + ": " + txt, alert.freq_once_per_bar)
+
+// ─── Dashboard ───────────────────────────────────────────────────────────
+pos = tblPos == "In alto a destra" ? position.top_right : tblPos == "In alto a sinistra" ? position.top_left : tblPos == "In basso a destra" ? position.bottom_right : position.bottom_left
+ts  = tblSize == "Minuscolo" ? size.tiny : tblSize == "Normale" ? size.normal : size.small
+
+var table dash = table.new(pos, 6, 32, border_width = 1)
+
+if barstate.islast
+    table.clear(dash, 0, 0, 5, 31)
+    hdr = color.new(color.gray, 20)
+    table.cell(dash, 0, 0, "Simbolo",   bgcolor = hdr, text_color = color.white, text_size = ts)
+    table.cell(dash, 1, 0, "Stato",     bgcolor = hdr, text_color = color.white, text_size = ts)
+    table.cell(dash, 2, 0, "Segnale",   bgcolor = hdr, text_color = color.white, text_size = ts)
+    table.cell(dash, 3, 0, "BW vs min", bgcolor = hdr, text_color = color.white, text_size = ts)
+    table.cell(dash, 4, 0, "Barre sqz", bgcolor = hdr, text_color = color.white, text_size = ts)
+    table.cell(dash, 5, 0, "ADR %",     bgcolor = hdr, text_color = color.white, text_size = ts)
+
+    // ordinamento: segnale recente > squeeze > armato > niente; a parità, ADR più alto
+    scores = array.new_float()
+    for i = 0 to n - 1
+        st     = aSt.get(i)
+        age    = aAge.get(i)
+        recent = aEv.get(i) != 0 and not na(age) and age <= evMaxAge
+        prio   = na(aBw.get(i)) ? 0 : recent ? 4 : st == 2 ? 3 : st == 1 ? 2 : 1
+        scores.push(prio * 1000 + nz(aAdr.get(i)))
+    idx = scores.sort_indices(order.descending)
+
+    row = 1
+    for k = 0 to n - 1
+        i      = idx.get(k)
+        st     = aSt.get(i)
+        ev     = aEv.get(i)
+        age    = aAge.get(i)
+        bwp    = aBw.get(i)
+        recent = ev != 0 and not na(age) and age <= evMaxAge
+        active = recent or st > 0
+        if na(bwp)
+            if not onlyActive
+                table.cell(dash, 0, row, names.get(i), bgcolor = color.new(color.gray, 70), text_color = color.white, text_size = ts)
+                table.cell(dash, 1, row, "n/d", bgcolor = color.new(color.gray, 70), text_color = color.white, text_size = ts)
+                row += 1
+            continue
+        if onlyActive and not active
+            continue
+
+        stTxt = st == 2 ? "SQUEEZE" : st == 1 ? "ARMATO" : "-"
+        stBg  = st == 2 ? color.red : st == 1 ? color.orange : color.new(color.gray, 60)
+        evTxt = recent ? (ev == 2 ? "PRE ▲" : ev == -2 ? "PRE ▼" : ev == 3 ? "OK ▲" : "OK ▼") + " (" + str.tostring(age) + ")" : ""
+        evBg  = recent ? (ev > 0 ? color.green : color.maroon) : color.new(color.gray, 85)
+
+        table.cell(dash, 0, row, names.get(i), bgcolor = color.new(color.blue, 20), text_color = color.white, text_size = ts)
+        table.cell(dash, 1, row, stTxt, bgcolor = stBg, text_color = color.white, text_size = ts)
+        table.cell(dash, 2, row, evTxt, bgcolor = evBg, text_color = color.white, text_size = ts)
+        table.cell(dash, 3, row, "+" + str.tostring(bwp, "#.0") + "%", bgcolor = color.new(color.gray, 85), text_color = chart.fg_color, text_size = ts)
+        table.cell(dash, 4, row, st > 0 ? str.tostring(aSq.get(i)) : "", bgcolor = color.new(color.gray, 85), text_color = chart.fg_color, text_size = ts)
+        table.cell(dash, 5, row, na(aAdr.get(i)) ? "n/d" : str.tostring(aAdr.get(i), "#.00"), bgcolor = color.new(color.gray, 85), text_color = chart.fg_color, text_size = ts)
+        row += 1
+
+    if row == 1
+        table.cell(dash, 0, 1, "Nessuno squeeze", bgcolor = color.gray, text_color = color.white, text_size = ts)

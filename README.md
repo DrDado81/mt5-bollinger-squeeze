@@ -49,3 +49,9 @@ Indicatore Pine Script v6 a tre fasi:
 3. **Conferma** (etichetta "OK"): entro `confBars` barre, una candela apre oltre la banda della barra precedente.
 
 Installazione: Pine Editor → incolla → Salva → Aggiungi al grafico. Alert: crea un alert scegliendo l'indicatore e la condizione. Per il Pine Screener usare il plot "Stato" (3/-3 conferma, 2/-2 pre-esplosione, 1 squeeze).
+
+## TradingView: `tradingview/BB_Squeeze_Scanner.pine`
+
+Dashboard multi-simbolo (28 cross + oro + DAX) con la stessa logica di `BB_Squeeze_PreBreakout.pine`, letta sull'ultima barra chiusa di ogni simbolo. Colonne: stato (SQUEEZE / ARMATO), ultimo segnale (PRE / OK con barre trascorse), distanza % del BW dal minimo, barre di squeeze, ADR % (range giornaliero medio sui giorni chiusi). Ordinamento: segnali recenti, poi squeeze, poi armati; a parità, ADR più alto.
+
+Usa 30 richieste `request.security` (limite 40 sui piani non Professional). Le due copie della logica (indicatore e scanner) vanno tenute allineate a mano: Pine non importa file locali.
