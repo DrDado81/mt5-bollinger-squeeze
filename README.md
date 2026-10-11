@@ -39,3 +39,13 @@ Il codice è stato scritto fuori da MetaEditor e non è ancora stato compilato n
 1. Compilazione senza errori/warning.
 2. Confronto visivo: rettangoli dell'EA (`InpDrawRange`) vs barre rosse dell'indicatore.
 3. Strategy Tester "Ogni tick basato su tick reali", su più simboli/timeframe, con costi reali.
+
+## TradingView: `tradingview/BB_Squeeze_PreBreakout.pine`
+
+Indicatore Pine Script v6 a tre fasi:
+
+1. **Squeeze** (sfondo rosso nel pannello BW): BW entro `tolPct`% dalla linea "Lowest Contraction" (minimo di 125 barre, come il BBW integrato di TradingView e l'EA MT5), BW piatto e media centrale piatta (entrambi disattivabili).
+2. **Pre-esplosione** (triangolo "Pre" sul prezzo): durante uno squeeze valido o entro `armBars` barre dalla fine, candela chiusa sulla banda superiore/inferiore e BW in salita da `riseBars` barre. Una volta per direzione per episodio.
+3. **Conferma** (etichetta "OK"): entro `confBars` barre, una candela apre oltre la banda della barra precedente.
+
+Installazione: Pine Editor → incolla → Salva → Aggiungi al grafico. Alert: crea un alert scegliendo l'indicatore e la condizione. Per il Pine Screener usare il plot "Stato" (3/-3 conferma, 2/-2 pre-esplosione, 1 squeeze).

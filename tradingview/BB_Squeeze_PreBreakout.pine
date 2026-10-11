@@ -1,0 +1,135 @@
+//@version=6
+// BB Squeeze - Pre-esplosione
+// Fasi:
+//   1. Squeeze: BW sul minimo di lenLow barre (come la linea "Lowest Contraction" del BBW di TradingView),
+//      opzionalmente BW piatto e media centrale piatta.
+//   2. Pre-esplosione: dopo uno squeeze valido, candela sulla banda superiore/inferiore e BW in salita.
+//   3. Conferma (opzionale): candela successiva che APRE oltre la banda della barra precedente.
+// Tutti i segnali su barra chiusa (fasi 1-2) o noti all'apertura (fase 3): niente repaint.
+indicator("BB Squeeze - Pre-esplosione", shorttitle = "BBSqz Pre", overlay = false, max_labels_count = 500)
+
+// ─── Input ───────────────────────────────────────────────────────────────
+grpBB  = "Bande di Bollinger"
+bbLen  = input.int(20, "Periodo", minval = 2, group = grpBB)
+bbMult = input.float(2.0, "Deviazioni standard", minval = 0.1, step = 0.1, group = grpBB)
+src    = input.source(close, "Sorgente", group = grpBB)
+
+grpSq    = "Squeeze"
+sqMode   = input.string("Minimo BW", "Definizione BW basso", options = ["Minimo BW", "Percentile BW"], group = grpSq, tooltip = "Minimo BW: BW entro la tolleranza dal minimo del lookback (come Lowest Contraction del BBW). Percentile: BW nel percentile più basso della sua storia.")
+lenLow   = input.int(125, "Lookback minimo/massimo BW", minval = 10, group = grpSq)
+tolPct   = input.float(10.0, "Tolleranza sopra il minimo (%)", minval = 0, step = 1, group = grpSq)
+lenRank  = input.int(250, "Lookback percentile", minval = 20, group = grpSq)
+pctMax   = input.float(10.0, "Percentile massimo", minval = 0, maxval = 100, group = grpSq)
+useFlat  = input.bool(true, "Richiedi BW piatto", group = grpSq)
+lenFlat  = input.int(10, "Barre per piattezza", minval = 2, group = grpSq)
+flatMax  = input.float(0.15, "Escursione max BW (frazione della media)", minval = 0, step = 0.01, group = grpSq, tooltip = "(max BW - min BW) / media BW sulle ultime N barre. 0.15 = il BW oscilla entro il 15%.")
+useSlope = input.bool(true, "Richiedi bande piatte", group = grpSq)
+slopeMax = input.float(1.0, "Pendenza max media centrale (x ATR)", minval = 0, step = 0.1, group = grpSq, tooltip = "|media - media di N barre fa| / ATR(14). Più basso = più severo.")
+minBars  = input.int(5, "Durata minima squeeze (barre)", minval = 1, group = grpSq)
+
+grpSig   = "Segnali"
+armBars  = input.int(10, "Barre valide dopo la fine dello squeeze", minval = 0, group = grpSig)
+touchTol = input.float(0.10, "Tolleranza tocco banda (frazione ampiezza)", minval = 0, maxval = 0.5, step = 0.05, group = grpSig, tooltip = "0 = il massimo/minimo deve toccare la banda. 0.10 = basta arrivare entro il 10% dell'ampiezza delle bande.")
+riseBars = input.int(2, "Barre consecutive di BW in salita", minval = 1, group = grpSig)
+showConf = input.bool(true, "Segnala conferma (apertura oltre la banda)", group = grpSig)
+confBars = input.int(5, "Barre utili per la conferma", minval = 1, group = grpSig)
+
+// ─── Calcoli ─────────────────────────────────────────────────────────────
+basis = ta.sma(src, bbLen)
+dev   = bbMult * ta.stdev(src, bbLen)
+upper = basis + dev
+lower = basis - dev
+width = upper - lower
+bw    = basis != 0 ? width / basis * 100 : na
+
+bwLow   = ta.lowest(bw, lenLow)
+bwHigh  = ta.highest(bw, lenLow)
+bwRank  = ta.percentrank(bw, lenRank)
+bwMean  = ta.sma(bw, lenFlat)
+bwRange = ta.highest(bw, lenFlat) - ta.lowest(bw, lenFlat)
+atr     = ta.atr(14)
+slope   = atr > 0 ? math.abs(basis - basis[lenFlat]) / atr : na
+bwUp    = ta.rising(bw, riseBars)
+
+condLow   = sqMode == "Minimo BW" ? bw <= bwLow * (1 + tolPct / 100) : bwRank <= pctMax
+condFlat  = not useFlat or (bwMean > 0 and bwRange / bwMean <= flatMax)
+condSlope = not useSlope or (not na(slope) and slope <= slopeMax)
+sqz       = condLow and condFlat and condSlope and not na(bwLow)
+
+// ─── Episodi di squeeze ──────────────────────────────────────────────────
+var int  sqCount     = 0      // barre consecutive di squeeze
+var int  barsSince   = na     // barre dalla fine di uno squeeze valido (na = nessun setup)
+var bool usedLong    = false  // pre-segnale long già dato in questo episodio
+var bool usedShort   = false
+var int  preLongBar  = na
+var int  preShortBar = na
+
+if sqz
+    sqCount += 1
+    if sqCount == 1
+        usedLong  := false
+        usedShort := false
+    barsSince := na
+else
+    if sqCount > 0
+        barsSince := sqCount >= minBars ? 1 : na
+        sqCount   := 0
+    else if not na(barsSince)
+        barsSince += 1
+        if barsSince > armBars
+            barsSince := na
+
+armed = (sqz and sqCount >= minBars) or not na(barsSince)
+
+// ─── Pre-esplosione ──────────────────────────────────────────────────────
+nearUpper = high >= upper - touchTol * width
+nearLower = low <= lower + touchTol * width
+
+preLong  = barstate.isconfirmed and armed and not usedLong and nearUpper and bwUp
+preShort = barstate.isconfirmed and armed and not usedShort and nearLower and bwUp
+
+if preLong
+    usedLong   := true
+    preLongBar := bar_index
+if preShort
+    usedShort   := true
+    preShortBar := bar_index
+
+// ─── Conferma: apertura oltre la banda della barra precedente ────────────
+// (la banda della barra corrente dipende dalla chiusura, che all'apertura non è nota)
+confLong  = showConf and not na(preLongBar) and bar_index > preLongBar and bar_index - preLongBar <= confBars and open > upper[1]
+confShort = showConf and not na(preShortBar) and bar_index > preShortBar and bar_index - preShortBar <= confBars and open < lower[1]
+
+if confLong
+    preLongBar := na
+if confShort
+    preShortBar := na
+
+// ─── Grafica: pannello BW ────────────────────────────────────────────────
+bwColor = sqz ? color.red : armed ? color.orange : color.blue
+plot(bw, "BandWidth", color = bwColor, linewidth = 2)
+plot(bwLow, "Lowest Contraction", color = color.teal)
+plot(bwHigh, "Highest Expansion", color = color.new(color.red, 60))
+plot(bwLow * (1 + tolPct / 100), "Soglia squeeze", color = color.new(color.teal, 50), style = plot.style_circles, display = sqMode == "Minimo BW" ? display.all : display.none)
+bgcolor(sqz ? color.new(color.red, 88) : na, title = "Sfondo squeeze")
+
+// ─── Grafica: segnali sul prezzo ─────────────────────────────────────────
+plotshape(preLong, "Pre-esplosione long", shape.triangleup, location.belowbar, color.new(color.green, 0), text = "Pre", textcolor = color.green, size = size.small, force_overlay = true)
+plotshape(preShort, "Pre-esplosione short", shape.triangledown, location.abovebar, color.new(color.red, 0), text = "Pre", textcolor = color.red, size = size.small, force_overlay = true)
+plotshape(confLong, "Conferma long", shape.labelup, location.belowbar, color.green, text = "OK", textcolor = color.white, size = size.small, force_overlay = true)
+plotshape(confShort, "Conferma short", shape.labeldown, location.abovebar, color.red, text = "OK", textcolor = color.white, size = size.small, force_overlay = true)
+
+// ─── Valori per Pine Screener / Data Window ──────────────────────────────
+// Stato: 3/-3 conferma, 2/-2 pre-esplosione, 1 squeeze, 0 niente
+state = confLong ? 3 : confShort ? -3 : preLong ? 2 : preShort ? -2 : sqz ? 1 : 0
+plot(state, "Stato", display = display.data_window)
+plot(bwRank, "Percentile BW", display = display.data_window)
+plot(sqCount, "Barre di squeeze", display = display.data_window)
+
+// ─── Alert ───────────────────────────────────────────────────────────────
+alertcondition(sqz and not sqz[1], "Inizio squeeze", "{{ticker}} {{interval}}: inizio squeeze BB")
+alertcondition(preLong, "Pre-esplosione long", "{{ticker}} {{interval}}: pre-esplosione LONG (banda superiore + BW in salita)")
+alertcondition(preShort, "Pre-esplosione short", "{{ticker}} {{interval}}: pre-esplosione SHORT (banda inferiore + BW in salita)")
+alertcondition(confLong, "Conferma long", "{{ticker}} {{interval}}: conferma LONG, apertura sopra la banda superiore")
+alertcondition(confShort, "Conferma short", "{{ticker}} {{interval}}: conferma SHORT, apertura sotto la banda inferiore")
+alertcondition(preLong or preShort, "Pre-esplosione (qualsiasi)", "{{ticker}} {{interval}}: pre-esplosione BB squeeze")
