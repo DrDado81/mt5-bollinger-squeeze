@@ -7,11 +7,16 @@ Indicatore + Expert Advisor MQL5 per identificare gli squeeze delle Bande di Bol
 | File | Destinazione in MT5 (`File > Apri cartella dati`) |
 |---|---|
 | `MQL5/Include/BBSqueeze/SqueezeCommon.mqh` | `MQL5\Include\BBSqueeze\` |
+| `MQL5/Indicators/BBW.mq5` | `MQL5\Indicators\` |
 | `MQL5/Indicators/BBSqueeze.mq5` | `MQL5\Indicators\` |
 | `MQL5/Indicators/BBSqueezeDashboard.mq5` | `MQL5\Indicators\` |
 | `MQL5/Experts/BBSqueezeEA.mq5` | `MQL5\Experts\` |
 
 Compilare in MetaEditor (F7) prima l'indicatore, poi l'EA. L'EA **non** dipende dall'indicatore (calcola tutto internamente con la stessa logica dell'include comune), quindi indicatore ed EA danno sempre lo stesso squeeze a parità di parametri.
+
+## `BBW.mq5`
+
+Porting 1:1 del "Bollinger BandWidth" integrato di TradingView: SMA + deviazione standard di popolazione, BBW = (upper − lower) / basis × 100, Highest Expansion e Lowest Contraction su 125 barre. Autonomo (nessun include). Non replica l'input `timeframe` (multi-timeframe) di TradingView.
 
 ## Definizione di squeeze
 
