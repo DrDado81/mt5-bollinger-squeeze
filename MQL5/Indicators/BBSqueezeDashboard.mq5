@@ -28,7 +28,8 @@ enum ENUM_DASH_POS
 
 enum ENUM_CLICK_ACTION
   {
-   CLICK_SWITCH = 0, // Cambia il simbolo di questo grafico
+   CLICK_OTHER  = 2, // Carica il simbolo nel grafico di lavoro (altra finestra)
+   CLICK_SWITCH = 0, // Cambia il simbolo di questo grafico (la dashboard si ricarica)
    CLICK_NEW    = 1  // Apri un nuovo grafico
   };
 
@@ -73,7 +74,9 @@ input int             InpX          = 10;            // Margine orizzontale (px)
 input int             InpY          = 25;            // Margine verticale (px)
 input int             InpFontSize   = 8;             // Dimensione testo
 input bool            InpLegend     = true;          // Mostra legenda
-input ENUM_CLICK_ACTION InpClick    = CLICK_SWITCH;  // Clic sul simbolo
+input ENUM_CLICK_ACTION InpClick    = CLICK_OTHER;   // Clic sul simbolo
+input string          InpTargetTag  = "BBW";         // Grafico di lavoro: quello con questo indicatore
+input bool            InpKeepTF     = true;          // Grafico di lavoro: mantieni il suo timeframe
 input int             InpTimerSec   = 5;             // Aggiornamento (secondi)
 
 input group "Avvisi"
@@ -221,10 +224,53 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
    if(i < 0 || i >= ArraySize(S) || !S[i].ok)
       return;
 
-   if(InpClick == CLICK_SWITCH)
+   if(InpClick == CLICK_OTHER)
+     {
+      long target = FindTargetChart();
+      if(target == 0)
+        {
+         Print("BBSqueezeDashboard: nessun altro grafico aperto, ne apro uno nuovo");
+         ChartOpen(S[i].sym, g_tf);
+        }
+      else
+        {
+         ENUM_TIMEFRAMES tf = InpKeepTF ? ChartPeriod(target) : g_tf;
+         ChartSetSymbolPeriod(target, S[i].sym, tf);
+        }
+     }
+   else if(InpClick == CLICK_SWITCH)
       ChartSetSymbolPeriod(0, S[i].sym, g_tf);
    else
       ChartOpen(S[i].sym, g_tf);
+  }
+
+//+------------------------------------------------------------------+
+//| Grafico di lavoro: il primo altro grafico che contiene un         |
+//| indicatore il cui nome breve inizia con InpTargetTag (es. "BBW"); |
+//| se nessuno lo contiene, il primo altro grafico aperto; 0 = nessuno |
+//+------------------------------------------------------------------+
+long FindTargetChart()
+  {
+   long me    = ChartID();
+   long first = 0;
+   for(long c = ChartFirst(); c >= 0; c = ChartNext(c))
+     {
+      if(c == me)
+         continue;
+      if(first == 0)
+         first = c;
+      if(InpTargetTag == "")
+         continue;
+      int wins = (int)ChartGetInteger(c, CHART_WINDOWS_TOTAL);
+      for(int w = 0; w < wins; w++)
+        {
+         int n = ChartIndicatorsTotal(c, w);
+         for(int k = 0; k < n; k++)
+            if(StringFind(ChartIndicatorName(c, w, k), InpTargetTag) == 0)
+               return c;
+        }
+     }
+   return first;
   }
 
 //+------------------------------------------------------------------+
