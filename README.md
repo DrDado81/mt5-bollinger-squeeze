@@ -39,7 +39,7 @@ Pannello BW: blu normale, rosso squeeze valido, arancio squeeze corto / PRONTO; 
 
 ## Dashboard `BBSqueezeDashboard.mq5`
 
-Indicatore sul grafico che analizza la lista di simboli (aggiungere il suffisso del broker se serve; il DAX ha nomi diversi da broker a broker, default `D30EUR` (BCM Markets)). Colonne: Simbolo (clic = apre il grafico), Fase, Barre di squeeze, BW sopra il minimo, ADR % (20 giorni chiusi), Spread/ADR % (spread medio delle ultime barre diviso range giornaliero medio: verde ≤5%, giallo ≤10%, rosso oltre). Ordine: BREAKOUT, PRE, SQUEEZE, PRONTO, VICINO; a parità, costo più basso prima. Per default mostra solo i simboli attivi. Lo spread medio usa il campo `spread` delle barre registrato dal broker; se manca usa lo spread corrente.
+Indicatore sul grafico che analizza la lista di simboli (aggiungere il suffisso del broker se serve; il DAX ha nomi diversi da broker a broker, default `D30EUR` (BCM Markets)). Colonne: Simbolo (clic = apre il grafico), Fase, Barre di squeeze, BW sopra il minimo, ADR % (20 giorni chiusi), Spread/ADR % (spread medio delle ultime barre diviso range giornaliero medio: verde ≤5%, giallo ≤10%, rosso oltre). Ordine: BREAKOUT, PRE, SQUEEZE, PRONTO, VICINO; a parità, costo più basso prima. Per default mostra tutti i simboli (opzione "solo attivi" disponibile). Lo spread medio usa il campo `spread` delle barre registrato dal broker; se manca usa lo spread corrente.
 
 ## Logica EA (v1, da riallineare alle fasi quando l'indicatore è definitivo)
 

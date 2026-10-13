@@ -61,7 +61,7 @@ input int             InpRiseBars   = 2;             // Barre di BW in salita
 input int             InpConfBars   = 5;             // Barre utili per la conferma
 
 input group "Dashboard"
-input bool            InpOnlyActive = true;          // Mostra solo simboli attivi
+input bool            InpOnlyActive = false;         // Mostra solo simboli attivi (false = tutti)
 input bool            InpShowNear   = false;         // Mostra anche i simboli VICINI allo squeeze
 input double          InpNearPct    = 25.0;          // Soglia VICINO (% sopra il minimo BW)
 input int             InpEvMaxAge   = 3;             // Mostra PRE/BREAKOUT delle ultime N barre
