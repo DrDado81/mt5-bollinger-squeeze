@@ -92,6 +92,7 @@ struct SymInfo
    SqzTracker        tr;
    double            bwPct;     // BW sopra il minimo, %
    double            adrPct;    // ADR in % del prezzo
+   double            adrPips;   // ADR in pip (cambi) o in punti di prezzo (oro, indici)
    double            costPct;   // spread medio / ADR, %
   };
 
@@ -104,7 +105,7 @@ const string    PFX = "BBSqzD_";
 
 //--- colonne
 const int NCOL = 6;
-string    COL_TITLE[6] = {"Simbolo", "Fase", "Barre", "BW vs min", "ADR %", "Spread/ADR"};
+string    COL_TITLE[6] = {"Simbolo", "Fase", "Barre", "BW vs min", "ADR pip", "Spread/ADR"};
 int       COL_W[6]     = {70, 120, 45, 70, 55, 75};
 
 //+------------------------------------------------------------------+
@@ -144,6 +145,7 @@ int OnInit()
       S[i].lastBar = 0;
       S[i].bwPct   = EMPTY_VALUE;
       S[i].adrPct  = EMPTY_VALUE;
+      S[i].adrPips = EMPTY_VALUE;
       S[i].costPct = EMPTY_VALUE;
       S[i].tr.Reset();
       S[i].hBB = S[i].hEMA = S[i].hATRkc = S[i].hATR = INVALID_HANDLE;
@@ -319,6 +321,24 @@ void UpdateSymbol(const int i)
   }
 
 //+------------------------------------------------------------------+
+//| Dimensione del pip: cambi a 5/3 decimali -> 10 punti               |
+//| (0.0001 / 0.01). Altri strumenti (oro, indici) -> 1 unità di      |
+//| prezzo: l'ADR è in dollari per l'oro e in punti indice per il DAX. |
+//+------------------------------------------------------------------+
+double PipSize(const string sym)
+  {
+   int    digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+   double point  = SymbolInfoDouble(sym, SYMBOL_POINT);
+   if(point <= 0.0)
+      return 0.0;
+   if(digits == 5 || digits == 3)
+      return point * 10.0;
+   if(digits == 4 || (digits == 2 && StringFind(sym, "JPY") >= 0))
+      return point;            // broker a 4/2 decimali: 1 punto = 1 pip
+   return 1.0;
+  }
+
+//+------------------------------------------------------------------+
 //| ADR % e spread/ADR %                                              |
 //| avgSpreadPts: spread medio in punti dalle barre (0 = non noto)    |
 //+------------------------------------------------------------------+
@@ -338,7 +358,9 @@ void UpdateCosts(const int i, double avgSpreadPts)
    cls /= got;
    if(rng <= 0.0 || cls <= 0.0)
       return;
-   S[i].adrPct = rng / cls * 100.0;
+   S[i].adrPct  = rng / cls * 100.0;
+   double pip   = PipSize(S[i].sym);
+   S[i].adrPips = (pip > 0.0) ? rng / pip : EMPTY_VALUE;
 
    if(avgSpreadPts <= 0.0)
       avgSpreadPts = (double)SymbolInfoInteger(S[i].sym, SYMBOL_SPREAD);
@@ -436,7 +458,7 @@ void Render()
 
       string barsTxt = (S[i].ok && S[i].ready && S[i].tr.inSqz) ? IntegerToString(S[i].tr.sqCount) : "";
       string bwTxt   = (S[i].bwPct == EMPTY_VALUE)   ? "n/d" : "+" + DoubleToString(S[i].bwPct, 1) + "%";
-      string adrTxt  = (S[i].adrPct == EMPTY_VALUE)  ? "n/d" : DoubleToString(S[i].adrPct, 2);
+      string adrTxt  = (S[i].adrPips == EMPTY_VALUE) ? "n/d" : DoubleToString(S[i].adrPips, S[i].adrPips < 100.0 ? 1 : 0);
       string costTxt = (S[i].costPct == EMPTY_VALUE) ? "n/d" : DoubleToString(S[i].costPct, 1) + "%";
       color  costBg  = (S[i].costPct == EMPTY_VALUE) ? clrGray : S[i].costPct <= 5.0 ? clrSeaGreen : S[i].costPct <= 10.0 ? clrDarkGoldenrod : clrFireBrick;
 
