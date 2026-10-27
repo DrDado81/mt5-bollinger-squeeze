@@ -1,8 +1,8 @@
 ﻿//+------------------------------------------------------------------+
 //|                                              GoldUsdStrength.mq5 |
-//|  Micro-dashboard: forza, momentum e volatilità di XAU e USD      |
-//|  rispetto a un paniere di valute, aggiornata in tempo reale      |
-//|  (barra in formazione inclusa).                                  |
+//|  Micro-dashboard per lo scalping su XAUUSD: forza istantanea     |
+//|  dell'oro (e del dollaro) contro un paniere di valute su tre     |
+//|  orizzonti brevi, prezzo attuale incluso.                        |
 //|                                                                  |
 //|  Metodo (ricostruzione propria, non quella del vecchio           |
 //|  indicatore con licenza, che non è nota):                        |
@@ -10,17 +10,19 @@
 //|    del cross con USD), lp_USD = 0, lp_XAU = ln(XAUUSD);          |
 //|  - indice di c = lp_c − media(lp del paniere), cioè il valore    |
 //|    di c contro la media del paniere (stile DXY equipesato);      |
-//|  - Forza      = variazione % dell'indice in InpStrLen barre;     |
-//|  - Momentum   = RSI(InpMomLen) dell'indice / 10 (0..10, 5 neutro)|
-//|  - Volatilità = variazione % media assoluta per barra            |
-//|                 dell'indice (InpVolLen barre);                   |
-//|  - Corr       = correlazione di Pearson delle variazioni per     |
-//|                 barra degli indici XAU e USD (InpCorrLen barre). |
-//|  Forza XAU − Forza USD = variazione % di XAUUSD (identità).      |
+//|  - Forza su h barre = variazione dell'indice dalla chiusura di   |
+//|    h barre fa al prezzo attuale, divisa per la dev. std attesa   |
+//|    (dev. std delle variazioni per barra × √h). Unità σ:          |
+//|    ±1 = movimento normale, ±2 = forte.                           |
+//|  - Mom  = RSI(InpMomLen) dell'indice XAU / 10 (0..10, 5 neutro); |
+//|  - Vol  = dev. std % per barra dell'indice XAU (barre chiuse);   |
+//|  - Corr = correlazione di Pearson delle variazioni per barra     |
+//|           degli indici XAU e USD (InpCorrLen barre).             |
+//|  Descrive cosa sta succedendo adesso: non è una previsione.      |
 //+------------------------------------------------------------------+
 #property copyright   "Dario"
 #property version     "1.00"
-#property description "Forza / momentum / volatilità di XAU e USD vs paniere valute"
+#property description "Forza istantanea di XAU e USD vs paniere valute (scalping)"
 
 #property indicator_chart_window
 #property indicator_buffers 0
@@ -42,12 +44,14 @@ input string          InpSuffix       = "";                           // Suffiss
 input bool            InpGoldInBasket = false;                        // Includi l'oro nella media del paniere
 
 input group "Calcolo"
-input ENUM_TIMEFRAMES InpTF           = PERIOD_CURRENT; // Timeframe
-input int             InpStrLen       = 20;             // Forza: barre di variazione
+input ENUM_TIMEFRAMES InpTF           = PERIOD_M1;      // Timeframe di calcolo (indipendente dal grafico)
+input int             InpH1           = 1;              // Orizzonte breve (barre)
+input int             InpH2           = 5;              // Orizzonte medio (barre)
+input int             InpH3           = 15;             // Orizzonte lungo (barre)
+input int             InpVolLen       = 60;             // Volatilità: barre chiuse per la dev. std
 input int             InpMomLen       = 14;             // Momentum: periodo RSI
-input int             InpVolLen       = 20;             // Volatilità: barre
-input int             InpCorrLen      = 50;             // Correlazione: barre
-input double          InpNeutral      = 0.10;           // Forza: soglia neutra (%)
+input int             InpCorrLen      = 60;             // Correlazione: barre
+input double          InpNeutral      = 0.5;            // Forza: soglia neutra (σ)
 input double          InpMomBand      = 1.0;            // Momentum: banda neutra attorno a 5
 
 input group "Pannello"
@@ -56,6 +60,10 @@ input int             InpX            = 10;             // Margine orizzontale (
 input int             InpY            = 25;             // Margine verticale (px)
 input int             InpFontSize     = 9;              // Dimensione testo
 input int             InpRefreshMs    = 250;            // Aggiornamento (millisecondi)
+
+input group "Avvisi"
+input bool            InpAlerts       = false;          // Alert quando la pressione diventa 3/3
+input bool            InpPush         = false;          // Notifiche push (app MT5)
 
 //--- valuta del paniere espressa in USD
 struct Leg
@@ -75,21 +83,28 @@ string          g_status = "";
 bool            g_ready = false;
 
 //--- risultati
-double g_strX, g_strU, g_momX, g_momU, g_volX, g_volU, g_corr;
+int    g_h[3];                  // orizzonti in barre
+double g_zX[3], g_zU[3];        // forza in σ per orizzonte
+double g_momX, g_volX, g_corr;
+int    g_press = 0;             // +1 XAU forte su tutti gli orizzonti, -1 debole, 0 misto
 
 const string PFX = "GUS_";
 
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   if(InpStrLen < 1 || InpMomLen < 2 || InpVolLen < 1 || InpCorrLen < 3)
+   if(InpH1 < 1 || InpH2 < 1 || InpH3 < 1 || InpMomLen < 2 || InpVolLen < 3 || InpCorrLen < 3)
      {
       Print("GoldUsdStrength: parametri non validi");
       return INIT_PARAMETERS_INCORRECT;
      }
 
    g_tf   = (InpTF == PERIOD_CURRENT) ? (ENUM_TIMEFRAMES)_Period : InpTF;
-   g_need = MathMax(MathMax(InpStrLen, 3 * InpMomLen), MathMax(InpVolLen, InpCorrLen)) + 2;
+   g_h[0] = InpH1;
+   g_h[1] = InpH2;
+   g_h[2] = InpH3;
+   int hMax = MathMax(InpH1, MathMax(InpH2, InpH3));
+   g_need = MathMax(MathMax(hMax, 3 * InpMomLen), MathMax(InpVolLen + 1, InpCorrLen)) + 2;
 
    ArrayResize(L, 1);
    L[0].ccy  = "XAU";
@@ -207,14 +222,32 @@ bool Compute()
       iu[k] = -mean;
      }
 
-   int last = g_need - 1;
-   g_strX = (ix[last] - ix[last - InpStrLen]) * 100.0;
-   g_strU = (iu[last] - iu[last - InpStrLen]) * 100.0;
+//--- dev. std per barra sulle sole barre chiuse (la barra in formazione è parziale)
+   int    last = g_need - 1;
+   double sdX  = StdDiff(ix, last, InpVolLen);
+   double sdU  = StdDiff(iu, last, InpVolLen);
+   if(sdX <= 0.0 || sdU <= 0.0)
+     {
+      g_status = "dati piatti";
+      return false;
+     }
+   int upX = 0, dnX = 0;
+   for(int h = 0; h < 3; h++)
+     {
+      double rt_h = MathSqrt((double)g_h[h]);
+      g_zX[h] = (ix[last] - ix[last - g_h[h]]) / (sdX * rt_h);
+      g_zU[h] = (iu[last] - iu[last - g_h[h]]) / (sdU * rt_h);
+      if(g_zX[h] >  InpNeutral) upX++;
+      if(g_zX[h] < -InpNeutral) dnX++;
+     }
    g_momX = Rsi(ix) / 10.0;
-   g_momU = Rsi(iu) / 10.0;
-   g_volX = MeanAbsDiff(ix, InpVolLen) * 100.0;
-   g_volU = MeanAbsDiff(iu, InpVolLen) * 100.0;
+   g_volX = sdX * 100.0;
    g_corr = CorrDiff(ix, iu, InpCorrLen);
+
+   int press = (upX == 3) ? 1 : (dnX == 3) ? -1 : 0;
+   if(press != 0 && press != g_press)
+      Notify(press > 0 ? "XAU forte su 3/3 orizzonti" : "XAU debole su 3/3 orizzonti");
+   g_press = press;
    g_status = "";
    return true;
   }
@@ -294,13 +327,17 @@ double Rsi(const double &x[])
   }
 
 //+------------------------------------------------------------------+
-double MeanAbsDiff(const double &x[], const int len)
+double StdDiff(const double &x[], const int last, const int len)
   {
-   int n = ArraySize(x);
-   double s = 0.0;
-   for(int k = n - len; k < n; k++)
-      s += MathAbs(x[k] - x[k - 1]);
-   return s / len;
+   double sum = 0.0, sq = 0.0;
+   for(int k = last - len; k < last; k++)
+     {
+      double d = x[k] - x[k - 1];
+      sum += d;
+      sq  += d * d;
+     }
+   double var = (sq - sum * sum / len) / (len - 1);
+   return (var > 0.0) ? MathSqrt(var) : 0.0;
   }
 
 //+------------------------------------------------------------------+
@@ -320,6 +357,29 @@ double CorrDiff(const double &a[], const double &b[], const int len)
    if(va <= 0.0 || vb <= 0.0)
       return 0.0;
    return cov / MathSqrt(va * vb);
+  }
+
+//+------------------------------------------------------------------+
+void Notify(const string what)
+  {
+   if(!InpAlerts && !InpPush)
+      return;
+   string msg = "GoldUsdStrength " + StringSubstr(EnumToString(g_tf), 7) + ": " + what;
+   if(InpAlerts) Alert(msg);
+   if(InpPush)   SendNotification(msg);
+  }
+
+//+------------------------------------------------------------------+
+//| Etichetta di un orizzonte in tempo (es. 5m, 1h)                  |
+//+------------------------------------------------------------------+
+string HLabel(const int bars)
+  {
+   int mins = bars * PeriodSeconds(g_tf) / 60;
+   if(mins < 60 || mins % 60 != 0)
+      return IntegerToString(mins) + "m";
+   if(mins < 1440 || mins % 1440 != 0)
+      return IntegerToString(mins / 60) + "h";
+   return IntegerToString(mins / 1440) + "d";
   }
 
 //+------------------------------------------------------------------+
@@ -345,7 +405,7 @@ void Render()
    int rowH = fs * 2 + 2;
    int pad  = fs;
    int c0   = fs * 5;          // colonna etichette
-   int cw   = fs * 7;          // colonne numeriche
+   int cw   = fs * 6;          // colonne numeriche
    int W    = pad * 2 + c0 + cw * 3;
    int H    = pad + rowH * 6;
    int chW  = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
@@ -353,56 +413,65 @@ void Render()
    int x0   = (InpPos == POS_TR || InpPos == POS_BR) ? chW - W - InpX : InpX;
    int y0   = (InpPos == POS_BL || InpPos == POS_BR) ? chH - H - InpY : InpY;
    int xl   = x0 + pad;
-   int xr1  = xl + c0 + cw;    // bordo destro delle colonne numeriche
-   int xr2  = xr1 + cw;
-   int xr3  = xr2 + cw;
+   int xr[3];                  // bordo destro delle colonne numeriche
+   xr[0] = xl + c0 + cw;
+   xr[1] = xr[0] + cw;
+   xr[2] = xr[1] + cw;
 
    Box(x0, y0, W, H);
 
-   string tf = StringSubstr(EnumToString(g_tf), 7);
-   int y = y0 + pad / 2;
-   Txt("title", xl, y, "XAU vs USD  " + tf, clrWhite, false, true);
-   Txt("stat",  xr3, y, g_ready ? "LIVE" : g_status, g_ready ? clrLime : clrOrange, true, false);
-
-   y += rowH;
-   Txt("h1", xr1, y, "Forza%", clrGray, true, false);
-   Txt("h2", xr2, y, "Mom",    clrGray, true, false);
-   Txt("h3", xr3, y, "Vol%",   clrGray, true, false);
-
    string nd = "-";
-   y += rowH;
-   Txt("xl", xl,  y, "XAU", clrGold, false, true);
-   Txt("xs", xr1, y, g_ready ? StringFormat("%+.2f", g_strX) : nd, g_ready ? StrColor(g_strX) : clrGray, true, false);
-   Txt("xm", xr2, y, g_ready ? DoubleToString(g_momX, 1)   : nd, g_ready ? MomColor(g_momX) : clrGray, true, false);
-   Txt("xv", xr3, y, g_ready ? DoubleToString(g_volX, 3)   : nd, clrWhite, true, false);
+   int y = y0 + pad / 2;
+   Txt("title", xl, y, "Forza XAU (σ)", clrWhite, false, true);
+   Txt("stat",  xr[2], y, g_ready ? "LIVE" : g_status, g_ready ? clrLime : clrOrange, true, false);
 
    y += rowH;
-   Txt("ul", xl,  y, "USD", clrDodgerBlue, false, true);
-   Txt("us", xr1, y, g_ready ? StringFormat("%+.2f", g_strU) : nd, g_ready ? StrColor(g_strU) : clrGray, true, false);
-   Txt("um", xr2, y, g_ready ? DoubleToString(g_momU, 1)   : nd, g_ready ? MomColor(g_momU) : clrGray, true, false);
-   Txt("uv", xr3, y, g_ready ? DoubleToString(g_volU, 3)   : nd, clrWhite, true, false);
+   for(int h = 0; h < 3; h++)
+      Txt("h" + IntegerToString(h), xr[h], y, HLabel(g_h[h]), clrGray, true, false);
 
-   double diff = g_strX - g_strU;
    y += rowH;
-   Txt("dl", xl,  y, "X-U", clrGray, false, false);
-   Txt("ds", xr1, y, g_ready ? StringFormat("%+.2f", diff) : nd, g_ready ? StrColor(diff) : clrGray, true, false);
-   Txt("cl", xr2, y, "Corr", clrGray, true, false);
-   Txt("cv", xr3, y, g_ready ? StringFormat("%+.2f", g_corr) : nd, clrWhite, true, false);
+   Txt("xl", xl, y, "XAU", clrGold, false, true);
+   for(int h = 0; h < 3; h++)
+      Txt("x" + IntegerToString(h), xr[h], y, g_ready ? StringFormat("%+.1f", g_zX[h]) : nd,
+          g_ready ? StrColor(g_zX[h]) : clrGray, true, h == 0);
 
-//--- lettura sintetica
-   string bias = "-";
-   color  bc   = clrGray;
+   y += rowH;
+   Txt("ul", xl, y, "USD", clrDodgerBlue, false, true);
+   for(int h = 0; h < 3; h++)
+      Txt("u" + IntegerToString(h), xr[h], y, g_ready ? StringFormat("%+.1f", g_zU[h]) : nd,
+          g_ready ? StrColor(g_zU[h]) : clrGray, true, false);
+
+   y += rowH;
+   string info = g_ready ? StringFormat("Mom %.1f   Vol %.3f%%   Corr %+.2f", g_momX, g_volX, g_corr) : nd;
+   Txt("info", xl, y, info, g_ready ? MomColor(g_momX) : clrGray, false, false);
+
+//--- pressione: XAU concorde su tutti gli orizzonti, conferma del dollaro opposto
+   string txt = "-";
+   color  clr = clrGray;
    if(g_ready)
      {
-      double n = InpNeutral;
-      if(g_strX > n && g_strU < -n)      { bias = "XAU forte / USD debole"; bc = clrLime; }
-      else if(g_strX < -n && g_strU > n) { bias = "XAU debole / USD forte"; bc = clrRed; }
-      else if(diff > n)                  { bias = "XAU > USD";              bc = clrPaleGreen; }
-      else if(diff < -n)                 { bias = "XAU < USD";              bc = clrLightSalmon; }
-      else                               { bias = "neutro";                 bc = clrSilver; }
+      int usdOpp = 0;
+      for(int h = 0; h < 3; h++)
+         if((g_press > 0 && g_zU[h] < -InpNeutral) || (g_press < 0 && g_zU[h] > InpNeutral))
+            usdOpp++;
+      if(g_press > 0)
+        {
+         txt = ShortToString(0x25B2) + " XAU forte 3/3" + (usdOpp > 0 ? ", USD debole " + IntegerToString(usdOpp) + "/3" : "");
+         clr = clrLime;
+        }
+      else if(g_press < 0)
+        {
+         txt = ShortToString(0x25BC) + " XAU debole 3/3" + (usdOpp > 0 ? ", USD forte " + IntegerToString(usdOpp) + "/3" : "");
+         clr = clrRed;
+        }
+      else
+        {
+         txt = "misto / neutro";
+         clr = clrSilver;
+        }
      }
    y += rowH;
-   Txt("bias", xl, y, bias, bc, false, true);
+   Txt("bias", xl, y, txt, clr, false, true);
 
    ChartRedraw(0);
   }
