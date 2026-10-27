@@ -44,15 +44,21 @@ Indicatore sul grafico che analizza la lista di simboli (aggiungere il suffisso 
 
 ## Micro-dashboard `GoldUsdStrength.mq5`
 
-Pannello compatto per lo scalping su XAUUSD: forza istantanea dell'oro (e del dollaro) contro un paniere di valute. Si aggiorna ogni `InpRefreshMs` ms (default 250) e a ogni tick del grafico; il valore usa il prezzo attuale, barra in formazione inclusa. Calcola sempre su `InpTF` (default M1), qualunque sia il timeframe del grafico. È autonomo: non usa include.
+Pannello compatto con colonne XAU e USD e un numero per riga: Forza, Momentum e Volatilità. Si aggiorna ogni `InpRefreshMs` ms (default 250) e a ogni tick del grafico, usando il prezzo attuale (barra in formazione inclusa). Calcola su `InpTF` (default M1), qualunque sia il timeframe del grafico. È autonomo: non usa include.
+
+| Riga | Lettura |
+|---|---|
+| **Forza** | 0 = neutro, ±1 = movimento normale, ±2 o più = forte. Verde sopra `InpNeutral`, rosso sotto −`InpNeutral`. |
+| **Momentum** | Scala 0–10, 5 = neutro. Verde sopra 6, rosso sotto 4. |
+| **Volatilità** | 1.0 = normale, 2.0 = doppia del normale (arancio da `InpVolHigh`). |
 
 - **Dati**: lo storico prezzi del terminale MT5 su cui gira (broker collegato). Usa `XAUUSD` e i 7 cross con USD del paniere `InpBasket` (`EURUSD`, `GBPUSD`, `USDJPY`, `USDCHF`, `AUDUSD`, `NZDUSD`, `USDCAD`). Li aggiunge da solo al Market Watch. Se il broker usa nomi con suffisso, impostare `InpSuffix`. Una valuta senza simbolo viene esclusa dal paniere, con un messaggio nel log.
 - **Indice**: ogni valuta del paniere viene espressa in USD con un ln del prezzo, e USD vale 0. L'indice è il valore meno la media del paniere, cioè un paniere equipesato in stile DXY. L'oro entra nella media solo se `InpGoldInBasket = true`.
-- **Forza (σ)** per XAU e USD su tre orizzonti (`InpH1`/`InpH2`/`InpH3`, default 1, 5 e 15 barre M1): variazione dell'indice dalla chiusura di h barre fa al prezzo attuale, divisa per la deviazione standard per barra (ultime `InpVolLen` barre chiuse) × √h. ±1 = movimento normale per la volatilità del momento, ±2 = forte. La normalizzazione rende confrontabili sessioni tranquille (Asia) e volatili (apertura USA). Neutro (grigio) entro ±`InpNeutral`.
-- **Pressione** (ultima riga): ▲ "XAU forte 3/3" quando l'oro è sopra soglia su tutti e tre gli orizzonti, ▼ "XAU debole 3/3" nel caso opposto, altrimenti "misto / neutro". Aggiunge quanti orizzonti confermano il dollaro in senso opposto. Alert/push opzionali quando passa a 3/3.
-- **Mom**: RSI(`InpMomLen`) dell'indice XAU diviso 10 (0..10, 5 neutro). **Vol**: dev. std % per barra dell'indice XAU. **Corr**: correlazione delle variazioni per barra fra indice XAU e indice USD su `InpCorrLen` barre (vicino a −1 = l'oro si muove come l'inverso del dollaro; vicino a 0 = per conto suo).
+- **Forza**: variazione dell'indice nelle ultime `InpStrLen` barre (default 5) fino al prezzo attuale, divisa per la variazione normale (scarto quadratico medio per barra delle ultime `InpVolLen` barre chiuse × √`InpStrLen`). In questo modo la stessa scala vale sia in sessioni tranquille sia in sessioni volatili.
+- **Momentum**: RSI(`InpMomLen`) dell'indice diviso 10.
+- **Volatilità**: scarto quadratico medio per barra delle ultime `InpVolShort` barre (barra in formazione inclusa) diviso quello normale.
 
-Descrive cosa sta succedendo adesso, non è una previsione: l'utilità per decidere long/short va verificata su demo/storico. È una ricostruzione autonoma: le formule del vecchio "Currency Strength Suite" non sono note, quindi i valori non coincidono con i suoi.
+Descrive cosa sta succedendo adesso, non è una previsione. È una ricostruzione autonoma: le formule del vecchio "Currency Strength Suite" non sono note, quindi i valori non coincidono con i suoi.
 
 ## Logica EA (v1, da riallineare alle fasi quando l'indicatore è definitivo)
 
