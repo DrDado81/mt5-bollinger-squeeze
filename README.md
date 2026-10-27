@@ -10,6 +10,7 @@ Indicatore + Expert Advisor MQL5 per identificare gli squeeze delle Bande di Bol
 | `MQL5/Indicators/BBW.mq5` | `MQL5\Indicators\` |
 | `MQL5/Indicators/BBSqueeze.mq5` | `MQL5\Indicators\` |
 | `MQL5/Indicators/BBSqueezeDashboard.mq5` | `MQL5\Indicators\` |
+| `MQL5/Indicators/GoldUsdStrength.mq5` | `MQL5\Indicators\` |
 | `MQL5/Experts/BBSqueezeEA.mq5` | `MQL5\Experts\` |
 
 Compilare in MetaEditor (F7) prima l'indicatore, poi l'EA. L'EA **non** dipende dall'indicatore (calcola tutto internamente con la stessa logica dell'include comune), quindi indicatore ed EA danno sempre lo stesso squeeze a parità di parametri.
@@ -40,6 +41,19 @@ Pannello BW: blu normale, rosso squeeze valido, arancio squeeze corto / PRONTO; 
 ## Dashboard `BBSqueezeDashboard.mq5`
 
 Indicatore sul grafico che analizza la lista di simboli (aggiungere il suffisso del broker se serve; il DAX ha nomi diversi da broker a broker, default `D30EUR` (BCM Markets)). Colonne: Simbolo (clic = carica il simbolo nel grafico di lavoro, cioè l'altro grafico con l'indicatore BBW, mantenendone il timeframe), Fase, Barre di squeeze, BW sopra il minimo, ADR pip (20 giorni chiusi; per oro e indici in unità di prezzo), Spread/ADR % (spread medio delle ultime barre diviso range giornaliero medio: verde ≤5%, giallo ≤10%, rosso oltre). Ordine: BREAKOUT, PRE, SQUEEZE, PRONTO, VICINO; a parità, costo più basso prima. Per default mostra tutti i simboli (opzione "solo attivi" disponibile). Lo spread medio usa il campo `spread` delle barre registrato dal broker; se manca usa lo spread corrente.
+
+## Micro-dashboard `GoldUsdStrength.mq5`
+
+Pannello compatto con forza, momentum e volatilità di XAU e USD. Si aggiorna ogni `InpRefreshMs` ms (default 250) e a ogni tick del grafico, e include la barra in formazione. È autonomo: non usa include.
+
+- **Dati**: lo storico prezzi del terminale MT5 su cui gira (broker collegato). Usa `XAUUSD` e i 7 cross con USD del paniere `InpBasket` (`EURUSD`, `GBPUSD`, `USDJPY`, `USDCHF`, `AUDUSD`, `NZDUSD`, `USDCAD`). Li aggiunge da solo al Market Watch. Se il broker usa nomi con suffisso, impostare `InpSuffix`. Una valuta senza simbolo viene esclusa dal paniere, con un messaggio nel log.
+- **Indice**: ogni valuta del paniere viene espressa in USD con un ln del prezzo, e USD vale 0. L'indice è il valore meno la media del paniere, cioè un paniere equipesato in stile DXY. L'oro entra nella media solo se `InpGoldInBasket = true`.
+- **Forza %**: variazione % dell'indice in `InpStrLen` barre. Forza XAU − Forza USD = variazione % di XAUUSD.
+- **Mom**: RSI(`InpMomLen`) dell'indice diviso 10. La scala va da 0 a 10 e 5 è neutro.
+- **Vol %**: variazione % media assoluta per barra dell'indice, calcolata su `InpVolLen` barre.
+- **Corr**: correlazione delle variazioni per barra fra indice XAU e indice USD, su `InpCorrLen` barre. Un valore vicino a −1 indica che l'oro si muove come l'inverso del dollaro. Un valore vicino a 0 indica che si muove per conto suo.
+
+È una ricostruzione autonoma: le formule del vecchio "Currency Strength Suite" non sono note, quindi i valori non coincidono con i suoi.
 
 ## Logica EA (v1, da riallineare alle fasi quando l'indicatore è definitivo)
 
